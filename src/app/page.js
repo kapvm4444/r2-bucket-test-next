@@ -1,24 +1,43 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardFooter } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "sonner";
+import { Separator } from "@/components/ui/separator";
+import {
+  Upload,
+  Trash2,
+  ExternalLink,
+  RefreshCw,
+  FileText,
+  CloudUpload,
+  FolderOpen,
+} from "lucide-react";
 
 export default function Home() {
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
-  const [loadingFiles, setLoadingFiles] = useState(true);
+  const [loadingFiles, setLoadingFiles] = useState(false);
   const [deletingKey, setDeletingKey] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [message, setMessage] = useState(null); // { text, type: 'success' | 'error' }
+  const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Load files on mount
   useEffect(() => {
     fetchFiles();
   }, []);
 
   const showMessage = (text, type = "success") => {
-    setMessage({ text, type });
-    setTimeout(() => setMessage(null), 4000);
+    if (type === "error") {
+      toast.error(text);
+    } else {
+      toast.success(text);
+    }
   };
 
   const fetchFiles = async () => {
@@ -34,15 +53,12 @@ export default function Home() {
     }
   };
 
-  const handleUpload = async (e) => {
-    const file = e.target.files[0];
+  const uploadFile = async (file) => {
     if (!file) return;
-
     setUploading(true);
     setUploadProgress(0);
 
     try {
-      // Step 1: Get presigned URL from our backend
       const res = await fetch("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -51,41 +67,43 @@ export default function Home() {
       const { signedUrl, error } = await res.json();
       if (error) throw new Error(error);
 
-      // Step 2: Upload DIRECTLY to R2 using presigned URL
-      // Using XMLHttpRequest to track upload progress
       await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
-            const pct = Math.round((event.loaded / event.total) * 100);
-            setUploadProgress(pct);
+            setUploadProgress(Math.round((event.loaded / event.total) * 100));
           }
         };
-        xhr.onload = () => {
-          if (xhr.status === 200) resolve();
-          else reject(new Error("Upload failed"));
-        };
+        xhr.onload = () =>
+          xhr.status === 200 ? resolve() : reject(new Error("Upload failed"));
         xhr.onerror = () => reject(new Error("Network error"));
         xhr.open("PUT", signedUrl);
         xhr.setRequestHeader("Content-Type", file.type);
         xhr.send(file);
       });
 
-      showMessage(`✅ "${file.name}" uploaded successfully!`);
-      fetchFiles(); // Refresh list
+      showMessage(`"${file.name}" uploaded successfully!`, "success");
+      fetchFiles();
     } catch (err) {
-      showMessage(`❌ Upload failed: ${err.message}`, "error");
+      showMessage(`Upload failed: ${err.message}`, "error");
     } finally {
       setUploading(false);
       setUploadProgress(0);
-      // Reset input so same file can be re-uploaded
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  const handleDelete = async (key, name) => {
-    if (!confirm(`Are you sure you want to delete "${name}"?`)) return;
+  const handleFileInput = (e) => uploadFile(e.target.files[0]);
 
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) uploadFile(file);
+  };
+
+  const handleDelete = async (key, name) => {
+    if (!confirm(`Delete "${name}"?`)) return;
     setDeletingKey(key);
     try {
       const res = await fetch("/api/delete", {
@@ -95,10 +113,10 @@ export default function Home() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      showMessage(`🗑️ "${name}" deleted successfully!`);
+      showMessage(`"${name}" deleted!`, "success");
       setFiles((prev) => prev.filter((f) => f.key !== key));
     } catch (err) {
-      showMessage(`❌ Delete failed: ${err.message}`, "error");
+      showMessage(`Delete failed: ${err.message}`, "error");
     } finally {
       setDeletingKey(null);
     }
@@ -112,312 +130,230 @@ export default function Home() {
 
   const isImage = (key) => /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(key);
 
+  const getFileExtension = (name) => name.split(".").pop().toUpperCase();
+
   return (
-    <main style={styles.main}>
-      <div style={styles.container}>
-        {/* Header */}
-        <div style={styles.header}>
-          <h1 style={styles.title}>☁️ R2 File Manager</h1>
-          <p style={styles.subtitle}>
-            Powered by <strong>Cloudflare R2</strong> — Upload, view and delete
-            files.
-          </p>
-        </div>
-
-        {/* Toast Message */}
-        {message && (
-          <div
-            style={{
-              ...styles.toast,
-              background: message.type === "error" ? "#fee2e2" : "#dcfce7",
-              borderColor: message.type === "error" ? "#f87171" : "#4ade80",
-              color: message.type === "error" ? "#991b1b" : "#166534",
-            }}
-          >
-            {message.text}
-          </div>
-        )}
-
-        {/* Upload Section */}
-        <div style={styles.uploadBox}>
-          <h2 style={styles.sectionTitle}>📤 Upload a File</h2>
-          <input
-            ref={fileInputRef}
-            type="file"
-            onChange={handleUpload}
-            disabled={uploading}
-            style={styles.fileInput}
-          />
-          {uploading && (
-            <div style={styles.progressWrapper}>
-              <div
-                style={{ ...styles.progressBar, width: `${uploadProgress}%` }}
-              />
-              <span style={styles.progressText}>{uploadProgress}%</span>
+    <main className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6">
+      <div className="max-w-5xl mx-auto space-y-6">
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between py-6">
+          <div className="flex items-center gap-3">
+            <div className="bg-orange-500 text-white p-2 rounded-xl">
+              <CloudUpload className="w-7 h-7" />
             </div>
-          )}
+            <div>
+              <h1 className="text-2xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">
+                R2 File Manager
+              </h1>
+              <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">
+                Powered by{" "}
+                <span className="font-semibold text-orange-500">
+                  Cloudflare R2
+                </span>{" "}
+                · Zero egress cost
+              </p>
+            </div>
+          </div>
+          <ThemeToggle />
         </div>
 
-        {/* Files List */}
-        <div style={styles.filesSection}>
-          <div style={styles.filesHeader}>
-            <h2 style={styles.sectionTitle}>📂 Your Files</h2>
-            <button
-              onClick={fetchFiles}
-              style={styles.refreshBtn}
-              disabled={loadingFiles}
+        {/* ── Upload Box ── */}
+        <Card className="border-2 border-dashed border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
+          <CardContent className="pt-6">
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              onClick={() => !uploading && fileInputRef.current?.click()}
+              className={`flex flex-col items-center justify-center gap-3 rounded-xl p-10 cursor-pointer transition-all duration-200 ${
+                dragOver
+                  ? "bg-orange-50 border-2 border-orange-400 scale-[1.01]"
+                  : "hover:bg-slate-50"
+              }`}
             >
-              {loadingFiles ? "Loading..." : "🔄 Refresh"}
-            </button>
+              <div className="bg-orange-100 p-4 rounded-full">
+                <Upload className="w-8 h-8 text-orange-500" />
+              </div>
+              <div className="text-center">
+                <p className="font-semibold text-slate-700 text-base">
+                  {uploading ? "Uploading..." : "Drop your file here"}
+                </p>
+                <p className="text-slate-400 text-sm mt-1">
+                  or{" "}
+                  <span className="text-orange-500 font-semibold underline underline-offset-2">
+                    click to browse
+                  </span>
+                </p>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={handleFileInput}
+                disabled={uploading}
+              />
+            </div>
+
+            {/* Progress Bar */}
+            {uploading && (
+              <div className="mt-4 space-y-2 px-2">
+                <Progress value={uploadProgress} className="h-2" />
+                <p className="text-xs text-slate-500 text-right font-medium">
+                  {uploadProgress}% uploaded
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ── Files Section ── */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FolderOpen className="w-5 h-5 text-slate-500" />
+              <h2 className="text-lg font-bold text-slate-800">Your Files</h2>
+              {!loadingFiles && (
+                <Badge variant="secondary" className="text-xs">
+                  {files.length} file{files.length !== 1 ? "s" : ""}
+                </Badge>
+              )}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchFiles}
+              disabled={loadingFiles}
+              className="gap-2"
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${loadingFiles ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </Button>
           </div>
 
-          {loadingFiles ? (
-            <p style={styles.empty}>Loading files...</p>
-          ) : files.length === 0 ? (
-            <p style={styles.empty}>No files yet. Upload something above!</p>
-          ) : (
-            <div style={styles.grid}>
-              {files.map((file) => (
-                <div key={file.key} style={styles.card}>
-                  {/* Preview */}
-                  <div style={styles.preview}>
-                    {isImage(file.key) ? (
-                      <img
-                        src={file.url}
-                        alt={file.name}
-                        style={styles.previewImg}
-                        onError={(e) => {
-                          e.target.style.display = "none";
-                          e.target.nextSibling.style.display = "block";
-                        }}
-                      />
-                    ) : null}
-                    <div
-                      style={{
-                        ...styles.fileIcon,
-                        display: isImage(file.key) ? "none" : "flex",
-                      }}
-                    >
-                      📄
-                    </div>
-                  </div>
+          <Separator />
 
-                  {/* File Info */}
-                  <div style={styles.cardBody}>
-                    <p style={styles.fileName} title={file.name}>
-                      {file.name.length > 25
-                        ? file.name.slice(0, 25) + "…"
-                        : file.name}
-                    </p>
-                    <p style={styles.fileMeta}>
-                      {formatSize(file.size)} •{" "}
-                      {new Date(file.lastModified).toLocaleDateString()}
-                    </p>
-                  </div>
-
-                  {/* Actions */}
-                  <div style={styles.cardActions}>
-                    <a
-                      href={file.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={styles.viewBtn}
-                    >
-                      View
-                    </a>
-                    <button
-                      onClick={() => handleDelete(file.key, file.name)}
-                      disabled={deletingKey === file.key}
-                      style={styles.deleteBtn}
-                    >
-                      {deletingKey === file.key ? "Deleting…" : "Delete"}
-                    </button>
-                  </div>
+          {/* Loading Skeletons */}
+          {loadingFiles && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="space-y-2">
+                  <Skeleton className="h-36 w-full rounded-xl" />
+                  <Skeleton className="h-4 w-3/4 rounded" />
+                  <Skeleton className="h-3 w-1/2 rounded" />
                 </div>
               ))}
             </div>
           )}
+
+          {/* Empty State */}
+          {!loadingFiles && files.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 text-center space-y-3">
+              <div className="bg-slate-100 p-5 rounded-full">
+                <FolderOpen className="w-10 h-10 text-slate-300" />
+              </div>
+              <p className="font-semibold text-slate-500">No files yet</p>
+              <p className="text-sm text-slate-400">
+                Upload a file above to get started!
+              </p>
+            </div>
+          )}
+
+          {/* File Grid */}
+          {!loadingFiles && files.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {files.map((file) => (
+                <Card
+                  key={file.key}
+                  className="overflow-hidden border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow duration-200 bg-white dark:bg-slate-900 group"
+                >
+                  {/* Preview */}
+                  <div className="h-36 bg-slate-100 flex items-center justify-center overflow-hidden relative">
+                    {isImage(file.key) ? (
+                      <img
+                        src={file.url}
+                        alt={file.name}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        onError={(e) => {
+                          e.target.style.display = "none";
+                          e.target.nextSibling.style.display = "flex";
+                        }}
+                      />
+                    ) : null}
+                    <div
+                      className={`flex-col items-center justify-center gap-1 ${
+                        isImage(file.key) ? "hidden" : "flex"
+                      } w-full h-full`}
+                    >
+                      <FileText className="w-10 h-10 text-slate-300" />
+                      <Badge
+                        variant="outline"
+                        className="text-xs font-bold uppercase text-slate-500"
+                      >
+                        {getFileExtension(file.name)}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  {/* Info */}
+                  <CardContent className="px-3 pt-3 pb-1 space-y-0.5">
+                    <p
+                      className="text-sm font-semibold text-slate-800 truncate"
+                      title={file.name}
+                    >
+                      {file.name}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {formatSize(file.size)} ·{" "}
+                      {new Date(file.lastModified).toLocaleDateString("en-IN")}
+                    </p>
+                  </CardContent>
+
+                  {/* Actions */}
+                  <CardFooter className="px-3 pb-3 pt-2 flex gap-2">
+                    <Button
+                      asChild
+                      size="sm"
+                      className="flex-1 h-8 text-xs bg-orange-500 hover:bg-orange-600 text-white"
+                    >
+                      <a
+                        href={file.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <ExternalLink className="w-3 h-3 mr-1" />
+                        View
+                      </a>
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="flex-1 h-8 text-xs"
+                      onClick={() => handleDelete(file.key, file.name)}
+                      disabled={deletingKey === file.key}
+                    >
+                      <Trash2 className="w-3 h-3 mr-1" />
+                      {deletingKey === file.key ? "..." : "Delete"}
+                    </Button>
+                  </CardFooter>
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
+
+        {/* ── Footer ── */}
+        <Separator />
+        <p className="text-center text-xs text-slate-400 pb-4">
+          Files stored on{" "}
+          <span className="font-semibold text-orange-400">Cloudflare R2</span> ·
+          Zero egress fees · Built with Next.js
+        </p>
       </div>
     </main>
   );
 }
-
-// ─── Inline Styles ────────────────────────────────────────────────────────────
-const styles = {
-  main: {
-    minHeight: "100vh",
-    background: "#f8fafc",
-    fontFamily: "system-ui, sans-serif",
-    padding: "24px 16px",
-  },
-  container: {
-    maxWidth: "900px",
-    margin: "0 auto",
-  },
-  header: {
-    textAlign: "center",
-    marginBottom: "32px",
-  },
-  title: {
-    fontSize: "2rem",
-    fontWeight: "800",
-    color: "#1e293b",
-    margin: "0 0 8px",
-  },
-  subtitle: {
-    color: "#64748b",
-    fontSize: "1rem",
-  },
-  toast: {
-    padding: "12px 16px",
-    borderRadius: "8px",
-    border: "1px solid",
-    marginBottom: "20px",
-    fontWeight: "600",
-    fontSize: "0.9rem",
-  },
-  uploadBox: {
-    background: "#fff",
-    border: "2px dashed #cbd5e1",
-    borderRadius: "12px",
-    padding: "28px",
-    marginBottom: "28px",
-    textAlign: "center",
-  },
-  sectionTitle: {
-    fontSize: "1.1rem",
-    fontWeight: "700",
-    color: "#1e293b",
-    marginTop: 0,
-    marginBottom: "16px",
-  },
-  fileInput: {
-    fontSize: "0.95rem",
-    cursor: "pointer",
-  },
-  progressWrapper: {
-    marginTop: "14px",
-    background: "#e2e8f0",
-    borderRadius: "999px",
-    height: "12px",
-    position: "relative",
-    overflow: "hidden",
-  },
-  progressBar: {
-    height: "100%",
-    background: "#6366f1",
-    borderRadius: "999px",
-    transition: "width 0.2s ease",
-  },
-  progressText: {
-    position: "absolute",
-    right: "8px",
-    top: "-1px",
-    fontSize: "10px",
-    fontWeight: "700",
-    color: "#1e293b",
-  },
-  filesSection: {
-    background: "#fff",
-    borderRadius: "12px",
-    padding: "28px",
-    boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
-  },
-  filesHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: "20px",
-  },
-  refreshBtn: {
-    padding: "6px 14px",
-    borderRadius: "8px",
-    border: "1px solid #e2e8f0",
-    background: "#f8fafc",
-    cursor: "pointer",
-    fontSize: "0.85rem",
-    fontWeight: "600",
-    color: "#475569",
-  },
-  empty: {
-    color: "#94a3b8",
-    textAlign: "center",
-    padding: "40px 0",
-    fontSize: "0.95rem",
-  },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-    gap: "16px",
-  },
-  card: {
-    border: "1px solid #e2e8f0",
-    borderRadius: "10px",
-    overflow: "hidden",
-    background: "#fafafa",
-    transition: "box-shadow 0.2s",
-  },
-  preview: {
-    height: "130px",
-    background: "#f1f5f9",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  previewImg: {
-    width: "100%",
-    height: "100%",
-    objectFit: "cover",
-    display: "block",
-  },
-  fileIcon: {
-    fontSize: "3rem",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-    height: "100%",
-  },
-  cardBody: {
-    padding: "10px 12px 4px",
-  },
-  fileName: {
-    fontWeight: "700",
-    fontSize: "0.85rem",
-    color: "#1e293b",
-    margin: "0 0 4px",
-  },
-  fileMeta: {
-    fontSize: "0.75rem",
-    color: "#94a3b8",
-    margin: 0,
-  },
-  cardActions: {
-    display: "flex",
-    gap: "8px",
-    padding: "10px 12px 12px",
-  },
-  viewBtn: {
-    flex: 1,
-    textAlign: "center",
-    padding: "6px",
-    borderRadius: "6px",
-    background: "#6366f1",
-    color: "#fff",
-    fontWeight: "600",
-    fontSize: "0.8rem",
-    textDecoration: "none",
-  },
-  deleteBtn: {
-    flex: 1,
-    padding: "6px",
-    borderRadius: "6px",
-    background: "#fee2e2",
-    color: "#dc2626",
-    fontWeight: "600",
-    fontSize: "0.8rem",
-    border: "none",
-    cursor: "pointer",
-  },
-};
